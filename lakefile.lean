@@ -74,6 +74,31 @@ def widgetJsAllTarget (pkg : NPackage _package.name) (isDev : Bool) :
   let jobs ← tsxs.mapM fun tsx => widgetTsxTarget pkg nodeModulesMutex tsx.fileStem.get! deps isDev
   BuildJob.collectArray jobs
 
+def customTsxTargetFilePath : FilePath :=
+  widgetDir / "tsx-target.txt"
+
+def customTsxFilePath : IO FilePath := do
+  let tsxFileName : FilePath := ⟨(← IO.FS.readFile customTsxTargetFilePath).trim⟩
+  unless tsxFileName.extension = some "tsx" do
+    throw <| IO.userError
+      s!"The file {tsxFileName} in {customTsxTargetFilePath} does not have the `.tsx` extension."
+  return widgetDir / "src" / tsxFileName
+
+/-- A version of `widgetJsAllTarget` that builds a single standalone `.tsx` file
+   whose name is specified in the `./widget/tsx-target.txt` file. -/
+def customWidgetJsTarget (pkg : NPackage _package.name) (isDev : Bool) :
+    IndexBuildM (BuildJob (Array FilePath)) := do
+  let tsx ← customTsxFilePath
+  let depFiles := #[ widgetDir / "rollup.config.js", widgetDir / "tsconfig.json" ]
+  let deps ← liftM <| depFiles.mapM inputFile
+  let deps := deps.push $ ← fetch (pkg.target ``widgetPackageLock)
+  let nodeModulesMutex ← IO.Mutex.new false
+  let job ← widgetTsxTarget pkg nodeModulesMutex tsx.fileStem.get! deps isDev
+  BuildJob.collectArray #[job]
+
+target customWidgetJs (pkg : NPackage _package.name) : Array FilePath := do
+  customWidgetJsTarget pkg (isDev := true)
+
 target widgetJsAll (pkg : NPackage _package.name) : Array FilePath := do
   widgetJsAllTarget pkg (isDev := false)
 
