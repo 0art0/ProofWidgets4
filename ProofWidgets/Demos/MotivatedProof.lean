@@ -1,26 +1,6 @@
 import Lean.Meta.ExprLens
+import ProofWidgets.Component.HtmlDisplay
 import ProofWidgets.Component.Panel
-
-open Lean Server
-
-structure InsertTextResponse where
-  label : String
-  edit : Lsp.WorkspaceEdit
-  deriving FromJson, ToJson
-
-def insertText (cmdStx : Syntax) (doc : FileWorker.EditableDocument) : RequestM InsertTextResponse := do
-  let enterval := "Click"
-  let .some pos := cmdStx.getTailPos? | panic! "could not get range"
-
-  let text := doc.meta.text
-  let msg := "\n    abracadabra"
-
-  -- insert new syntax into document
-  let textEdit : Lsp.TextEdit := { range := { start := text.utf8PosToLspPos pos, «end» := text.utf8PosToLspPos pos }, newText := msg }
-  let textDocumentEdit : Lsp.TextDocumentEdit := { textDocument := { uri := doc.meta.uri, version? := doc.meta.version }, edits := [textEdit].toArray }
-  let edit := Lsp.WorkspaceEdit.ofTextDocumentEdit textDocumentEdit
-
-  return { label := enterval, edit := edit }
 
 def Lean.Syntax.contains? (pos : String.Pos) (stx : Syntax)  : Bool := Option.toBool do
   let ⟨start, stop⟩ ← stx.getRange?
@@ -33,19 +13,42 @@ def Lean.Syntax.Stack.findSmallest? (stack : Syntax.Stack) (p : Syntax → Bool)
 def Lean.Syntax.getHeadKind? (stx : Syntax) :=
   Syntax.getKind <$> stx.getHead?
 
-#check Snapshots.Snapshot.stx
-#check Syntax.findStack?
-#check FileMap.lspPosToUtf8Pos
+
+open Lean Server
+
+def insertText (cmdStx : Syntax) (msg : String) (doc : FileWorker.EditableDocument) : RequestM Lsp.WorkspaceEdit := do
+  let .some pos := cmdStx.getTailPos? | panic! "could not get range"
+  let text := doc.meta.text
+  let textEdit : Lsp.TextEdit := { range := { start := text.utf8PosToLspPos pos, «end» := text.utf8PosToLspPos pos }, newText := msg }
+  let textDocumentEdit :=
+    { textDocument := { uri := doc.meta.uri, version? := doc.meta.version },
+      edits := #[textEdit] }
+  return .ofTextDocumentEdit textDocumentEdit
+
+structure InsertionProps where
+  pos : Lsp.Position
+  label : String
+  text : String
+deriving RpcEncodable
 
 @[server_rpc_method]
-def makeInsertionCommand (cursorPos : Lsp.Position) : RequestM (RequestTask InsertTextResponse) :=
-  RequestM.withWaitFindSnapAtPos cursorPos fun snap ↦ do
-    let doc ← RequestM.readDoc
-    let text := doc.meta.text
-    -- let stk := snap.stx.findStack? (Lean.Syntax.contains? <| text.lspPosToUtf8Pos cursorPos)
-    insertText snap.stx doc
+def makeInsertionCommand : InsertionProps → RequestM (RequestTask Lsp.WorkspaceEdit)
+  | ⟨pos, _, text⟩ =>
+    RequestM.withWaitFindSnapAtPos pos fun snap ↦ do
+      let doc ← RequestM.readDoc
+      insertText snap.stx text doc
 
 open ProofWidgets
+
+@[widget_module]
+def InsertComponent : Component InsertionProps where
+  javascript := include_str "../../build/js/motivatedProofUI.js"
+
+open scoped Jsx in
+#html <InsertComponent pos={⟨58, 0⟩} label={"Introduce variables into the context"} text={"Hello world"} />
+
+#check RequestM
+
 
 @[widget_module]
 def InsertPanel : Component PanelWidgetProps where
@@ -78,17 +81,12 @@ function ConvButton(pos) {
 }
 
 export default function(props) {
-  return e('details', {open: true}, [e('div', null, e(ConvButton, props.pos))])
+  return (
+  <details open=\"true\">
+    <summary>Moves for constructing a well-motivated proof.</summary>
+    <div>
+      ConvButton(props.pos);
+    </div>
+  </details>);
 }
   "
-
--- macro "motivated_proof" tacs:tacticSeq : tactic =>
---   `(tactic| with_panel_widgets [InsertPanel] $tacs)
-
-macro "abracadabra" : tactic => `(tactic| sorry)
-
-/-! # Example usage -/
-
-example :∀ n : ℕ, n = n := by
-  with_panel_widgets [InsertPanel]
-    abracadabra
