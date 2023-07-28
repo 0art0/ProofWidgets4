@@ -47,12 +47,11 @@ structure InsertionResponse where
   newPos : Lsp.Position
 deriving RpcEncodable
 
-def insertText (pos : Lsp.Position) (stx : Syntax) (msg : String) (doc : FileWorker.EditableDocument) :
+def insertText (pos : Lsp.Position) (snap : Snapshots.Snapshot) (msg : String) (doc : FileWorker.EditableDocument) :
     RequestM InsertionResponse := do
   let filemap := doc.meta.text
-  let .some tailPos := stx.getTailPos? | IO.throwServerError "Unable to retrieve syntax tail position."
-  let lspTailPos := max pos (filemap.utf8PosToLspPos tailPos)
-  let indentation := stx.getIndentation
+  let lspTailPos := max pos (filemap.utf8PosToLspPos snap.endPos)
+  let indentation := snap.stx.getIndentation
   let textEdit : Lsp.TextEdit :=
     { range := { start := lspTailPos, «end» := lspTailPos },
       newText := "\n".pushn ' ' indentation ++ msg }
@@ -67,7 +66,7 @@ def makeInsertionCommand : InsertionCommandProps → RequestM (RequestTask Inser
   | ⟨pos, text⟩ =>
     RequestM.withWaitFindSnapAtPos pos fun snap ↦ do
       let doc ← RequestM.readDoc
-      insertText pos snap.stx text doc
+      insertText pos snap text doc
 
 end TextInsertion
 
