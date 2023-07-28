@@ -3,7 +3,7 @@ import { Position, Range, TextEdit, WorkspaceEdit } from 'vscode-languageserver-
 import { EditorContext, RpcContext, useAsync } from '@leanprover/infoview';
 import { Button } from '@mui/material';
 
-function insertText(props:{pos:Position, label:String, text:String}) {
+function insertText(props:{pos:Position, text: String}) {
   const rpcSession = React.useContext(RpcContext)
   const editorCtx = React.useContext(EditorContext)
   const asyncWSEdit = useAsync<WorkspaceEdit>(async () => {
@@ -19,6 +19,17 @@ function insertText(props:{pos:Position, label:String, text:String}) {
   };
 };
 
-export default function(props:{pos:Position, label:String, text:String}): JSX.Element {
-  return <Button onClick={insertText(props)}>{props.label}</Button>;
+function InsertionButton(props:{pos:Position, label:String, text:String}): JSX.Element {
+  return <Button onClick={insertText({pos: props.pos, text: props.text})}>{props.label}</Button>;
+}
+
+export default function motivatedProofPanel(props:{pos:Position, buttons:{label:String, text:String}[]}) {
+  return (
+  <details open={true}>
+    <summary>Motivated proof interface</summary>
+    { props.buttons.map ((button:{label:String, text:String}) => {
+        return <InsertionButton pos={props.pos} label={button.label} text={button.text} />;
+      }) }
+  </details>
+  );
 }
