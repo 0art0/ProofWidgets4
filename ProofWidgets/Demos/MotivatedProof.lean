@@ -25,6 +25,9 @@ def String.getLineIndentation (line : String) : Nat :=
 def Lean.Syntax.getIndentation (stx : Syntax) : Nat :=
   stx |>.reprint.get! |>.getLastLine! |>.getLineIndentation
 
+instance [LE α] [DecidableRel (LE.le (α := α))] : Max α where
+  max x y := if x ≤ y then y else x
+
 end Utils
 
 section TextInsertion
@@ -48,15 +51,16 @@ def insertText (pos : Lsp.Position) (stx : Syntax) (msg : String) (doc : FileWor
     RequestM InsertionResponse := do
   let filemap := doc.meta.text
   let .some tailPos := stx.getTailPos? | IO.throwServerError "Unable to retrieve syntax tail position."
+  let lspTailPos := max pos (filemap.utf8PosToLspPos tailPos)
   let indentation := stx.getIndentation
   let textEdit : Lsp.TextEdit :=
-    { range := { start := filemap.utf8PosToLspPos tailPos, «end» := filemap.utf8PosToLspPos tailPos },
+    { range := { start := lspTailPos, «end» := lspTailPos },
       newText := "\n".pushn ' ' indentation ++ msg }
   let textDocumentEdit : Lsp.TextDocumentEdit :=
     { textDocument := { uri := doc.meta.uri, version? := doc.meta.version },
       edits := #[textEdit] }
   let edit := Lsp.WorkspaceEdit.ofTextDocumentEdit textDocumentEdit
-  return { edit := edit, newPos := ⟨pos.line + 2, indentation⟩ }
+  return { edit := edit, newPos := ⟨lspTailPos.line + 1, indentation⟩ }
 
 @[server_rpc_method]
 def makeInsertionCommand : InsertionCommandProps → RequestM (RequestTask InsertionResponse)
@@ -77,8 +81,8 @@ end MotivatedProofInterface
 
 /-- The buttons that appear as proof-generating moves in the infoview panel. -/
 def tacticButtons : Array InsertionButton :=
-  #[ ◾ "Introduce variables into the context"  →  intros,
-     ◾       "Use function extensionality"     →  apply funext,
+  #[ ◾ "Introduce variables into the context"  →  try (intros),
+     ◾       "Use function extensionality"     →  try (apply funext),
      ◾           "Insert a sorry"              →  sorry,
      ◾         "Simplify the target"           →  simp ]
 
@@ -112,4 +116,4 @@ end MotivatedProofInterface
 
 example : 1 = 1 := by
   motivated_proof
-  sorry
+    sorry
