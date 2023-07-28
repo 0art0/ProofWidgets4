@@ -5,6 +5,8 @@ open Lean Server
 
 section Utils
 
+syntax (name := motivatedProofMode) "motivated_proof" tacticSeq : tactic
+
 def Lean.Syntax.contains? (pos : String.Pos) (stx : Syntax) : Bool := Option.toBool do
   let ⟨start, stop⟩ ← stx.getRange?
   guard <| start ≤ pos
@@ -28,6 +30,38 @@ def Lean.Syntax.getIndentation (stx : Syntax) : Nat :=
 instance [LE α] [DecidableRel (LE.le (α := α))] : Max α where
   max x y := if x ≤ y then y else x
 
+namespace SyntaxTraversal
+
+-- TODO: Discard or move to a different file
+
+open Syntax MonadTraverser
+
+abbrev SyntaxTraverserM := EStateM String Traverser
+
+instance : MonadTraverser SyntaxTraverserM where
+  st := inferInstance
+
+def SyntaxTraverserM.runStx (τ : SyntaxTraverserM Syntax) (stx : Syntax) : Option Syntax := do
+  let .ok res _ := τ.run (Traverser.fromSyntax stx) | none
+  return res
+
+def SyntaxTraverserM.runStxAndPrint (τ : SyntaxTraverserM Syntax) (stx : Syntax) : Option String :=
+  τ.runStx stx >>= Syntax.reprint
+
+-- Add a tactic `tac` to syntax of the form `motivated_proof $tacs`.
+def extendMotivatedProof (tac : String) : SyntaxTraverserM Syntax := do
+  goDown 1
+  goDown 0
+  goDown 0
+  let cur ← getCur
+  setCur <| cur.setArgs (cur.getArgs |>.push (.node .none `null #[]) |>.push (.atom .none tac))
+  goUp
+  goUp
+  goUp
+  getCur
+
+end SyntaxTraversal
+
 end Utils
 
 section TextInsertion
@@ -47,26 +81,37 @@ structure InsertionResponse where
   newPos : Lsp.Position
 deriving RpcEncodable
 
-def insertText (pos : Lsp.Position) (snap : Snapshots.Snapshot) (msg : String) (doc : FileWorker.EditableDocument) :
+#check IO
+#check RequestM
+#check Meta.MetaM.toIO _ _
+#check Core.Context
+
+#check FileWorker.EditableDocument
+
+
+def insertText (snapStx : Syntax) (msg : String) (doc : FileWorker.EditableDocument) :
     RequestM InsertionResponse := do
   let filemap := doc.meta.text
-  let lspTailPos := max pos (filemap.utf8PosToLspPos snap.endPos)
-  let indentation := snap.stx.getIndentation
+  let .some motivatedProofBlock := snapStx.find? (·.getKind = ``motivatedProofMode) |
+    IO.throwServerError "No motivated proof block at position."
+  let .some newStx := (SyntaxTraversal.extendMotivatedProof msg).runStx motivatedProofBlock |
+    IO.throwServerError "Failed to modify motivated proof block."
+  let .some range := motivatedProofBlock.getRange? | IO.throwServerError "Failed to get syntax range."
   let textEdit : Lsp.TextEdit :=
-    { range := { start := lspTailPos, «end» := lspTailPos },
-      newText := "\n".pushn ' ' indentation ++ msg }
+    { range := { start := filemap.utf8PosToLspPos range.start, «end» := filemap.utf8PosToLspPos range.stop },
+      newText := newStx.reprint.get! }
   let textDocumentEdit : Lsp.TextDocumentEdit :=
     { textDocument := { uri := doc.meta.uri, version? := doc.meta.version },
       edits := #[textEdit] }
   let edit := Lsp.WorkspaceEdit.ofTextDocumentEdit textDocumentEdit
-  return { edit := edit, newPos := ⟨lspTailPos.line + 1, indentation⟩ }
+  return { edit := edit, newPos := filemap.utf8PosToLspPos newStx.getRange?.get!.stop }
 
 @[server_rpc_method]
 def makeInsertionCommand : InsertionCommandProps → RequestM (RequestTask InsertionResponse)
   | ⟨pos, text⟩ =>
     RequestM.withWaitFindSnapAtPos pos fun snap ↦ do
       let doc ← RequestM.readDoc
-      insertText pos snap text doc
+      insertText snap.stx text doc
 
 end TextInsertion
 
@@ -99,7 +144,7 @@ deriving RpcEncodable
 def MotivatedProofPanel : Component MotivatedProofPanelProps where
   javascript := include_str "../../build/js/motivatedProofUI.js"
 
-syntax (name := motivatedProofMode) "motivated_proof" tacticSeq : tactic
+
 
 open Lean Elab Tactic in
 @[tactic motivatedProofMode]
