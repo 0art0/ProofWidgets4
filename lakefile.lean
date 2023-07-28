@@ -93,7 +93,16 @@ def customWidgetJsTarget (pkg : NPackage _package.name) (isDev : Bool) :
   let deps ← liftM <| depFiles.mapM inputFile
   let deps := deps.push $ ← fetch (pkg.target ``widgetPackageLock)
   let nodeModulesMutex ← IO.Mutex.new false
-  let job ← widgetTsxTarget pkg nodeModulesMutex tsx.fileStem.get! deps isDev
+  let tsxFileStem := tsx.fileStem.get!
+  IO.println s!"Building JavaScript file for {tsxFileStem}..."
+  let jsFile := pkg.buildDir / "js" / s!"{tsxFileStem}.js"
+  let jsFileTrace := pkg.buildDir / "js" / s!"{tsxFileStem}.js.trace"
+  if (← jsFile.pathExists) && (← jsFileTrace.pathExists) then
+    IO.println "Removing previous builds ..."
+    IO.FS.removeFile jsFile
+    IO.FS.removeFile jsFileTrace
+  else IO.println "No previous builds to remove. Starting afresh ..."
+  let job ← widgetTsxTarget pkg nodeModulesMutex tsxFileStem deps isDev
   BuildJob.collectArray #[job]
 
 target customWidgetJs (pkg : NPackage _package.name) : Array FilePath := do
