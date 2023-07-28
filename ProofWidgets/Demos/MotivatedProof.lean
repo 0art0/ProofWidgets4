@@ -16,8 +16,14 @@ def Lean.Syntax.Stack.findSmallest? (stack : Syntax.Stack) (p : Syntax → Bool)
 def Lean.Syntax.getHeadKind? (stx : Syntax) :=
   Syntax.getKind <$> stx.getHead?
 
-def getLineIndentation (line : String) : Nat :=
+def String.getLastLine! (text : String) : String :=
+  text |>.trim |>.splitOn "\n" |>.getLast!
+
+def String.getLineIndentation (line : String) : Nat :=
   line |>.takeWhile (· ∈ [' ', '·', '{', '}']) |>.length
+
+def Lean.Syntax.getIndentation (stx : Syntax) : Nat :=
+  stx |>.reprint.get! |>.getLastLine! |>.getLineIndentation
 
 end Utils
 
@@ -38,23 +44,26 @@ structure InsertionResponse where
   newPos : Lsp.Position
 deriving RpcEncodable
 
-def insertText (pos : Lsp.Position) (msg : String) (doc : FileWorker.EditableDocument) :
+def insertText (pos : Lsp.Position) (stx : Syntax) (msg : String) (doc : FileWorker.EditableDocument) :
     RequestM InsertionResponse := do
+  let filemap := doc.meta.text
+  let .some tailPos := stx.getTailPos? | IO.throwServerError "Unable to retrieve syntax tail position."
+  let indentation := stx.getIndentation
   let textEdit : Lsp.TextEdit :=
-    { range := { start := pos, «end» := pos },
-      newText := msg }
+    { range := { start := filemap.utf8PosToLspPos tailPos, «end» := filemap.utf8PosToLspPos tailPos },
+      newText := "\n".pushn ' ' indentation ++ msg }
   let textDocumentEdit : Lsp.TextDocumentEdit :=
     { textDocument := { uri := doc.meta.uri, version? := doc.meta.version },
       edits := #[textEdit] }
   let edit := Lsp.WorkspaceEdit.ofTextDocumentEdit textDocumentEdit
-  return { edit := edit, newPos := ⟨pos.line + 1, pos.character⟩ }
+  return { edit := edit, newPos := ⟨pos.line + 2, indentation⟩ }
 
 @[server_rpc_method]
 def makeInsertionCommand : InsertionCommandProps → RequestM (RequestTask InsertionResponse)
   | ⟨pos, text⟩ =>
     RequestM.withWaitFindSnapAtPos pos fun snap ↦ do
       let doc ← RequestM.readDoc
-      insertText pos text doc
+      insertText pos snap.stx text doc
 
 end TextInsertion
 
@@ -99,6 +108,7 @@ def motivatedProofImpl : Tactic
   | _ => throwUnsupportedSyntax
 
 end MotivatedProofInterface
+
 
 example : 1 = 1 := by
   motivated_proof
