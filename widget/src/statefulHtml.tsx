@@ -7,6 +7,13 @@ interface ButtonProps {
   onClick: RpcPtr<'IOUnit'>
 }
 
+interface TextInputProps {
+  label?: string
+  placeholder: string
+  onChange: RpcPtr<'StringToIOUnit'>
+  value: string
+}
+
 interface StatefulHtmlProps {
   html: RpcPtr<'IOHtml'>
   pos: DocumentPosition
@@ -14,6 +21,7 @@ interface StatefulHtmlProps {
 
 type Interaction =
   | { type: 'Button', props: ButtonProps }
+  | { type: 'TextInput', props: TextInputProps }
 
 type InteractionState = Interaction[]
 
@@ -25,10 +33,10 @@ function updateInteractionState(
 
 const InteractionDispatchContext = React.createContext<React.Dispatch<Interaction> | null>(null)
 
-export function Button (props: ButtonProps): JSX.Element {
+export function Button(props: ButtonProps): JSX.Element {
   const rs = useRpcSession()
   const interactionDispatch = React.useContext(InteractionDispatchContext)
-  return <button onClick={async () => {
+  const onClick = async () => {
     await rs.call<ButtonProps, null>(
       "Button.rpc", props)
       .then(() => {
@@ -37,10 +45,35 @@ export function Button (props: ButtonProps): JSX.Element {
       .catch((e) => {
         console.error("Error clicking button:", e)
       })
-  }}>{props.label}</button>
+  }
+  return <button onClick={onClick}>{props.label}</button>
 }
 
-export default function StatefulHtml (props: StatefulHtmlProps): JSX.Element {
+export function TextInput(props: TextInputProps): JSX.Element {
+  const rs = useRpcSession()
+  const interactionDispatch = React.useContext(InteractionDispatchContext)
+  const onChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    await rs.call<TextInputProps, null>(
+      "TextInput.rpc", { ...props, value: e.target.value }
+    ).then(() => {
+      interactionDispatch?.({ type: 'TextInput', props: { ...props, value: e.target.value } })
+  }).catch((e) => {
+      console.error("Error changing text input:", e)
+    })
+  }
+  return (
+  <div>
+    {props.label && <label>{props.label}</label>}
+    <input
+      type="text"
+      value={props.value}
+      placeholder={props.placeholder}
+      onChange={onChange}
+    />
+  </div>)
+}
+
+export default function StatefulHtml(props: StatefulHtmlProps): JSX.Element {
   const rs = useRpcSession()
   const [renderedContent, setRenderedContent] = React.useState<JSX.Element>(<></>)
 
