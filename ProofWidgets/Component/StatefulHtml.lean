@@ -112,38 +112,40 @@ def runInteractiveM {α} (m : InteractiveM α) : IO Html := do
     </div>)
   createStatefulHtml  html
 
+-- Hom(Hom(a, -), -) iso a
 
--- Hom(Hom(-, r), r)
-def Cont (r a : Type) := (a → r) → r
+def Cont (r a : Type) := ((a → r) → r)
 
-def Cont.pure {r α} (a : α) : Cont r α := fun k => k a
+def Cont.run {r} (x : Cont r a) (k : a → r) : r :=
+  x k
 
-def Cont.bind {r α β} (x : Cont r α) (f : α → Cont r β) : Cont r β :=
-  fun k => x (fun a => f a k)
+def Cont.pure {r} (val : a) : Cont r a := fun k => k val
 
-def Cont.map {r α β} (x : Cont r α) (f : α → β) : Cont r β :=
+def Cont.bind (ka : Cont r a) (a2kb : a → Cont r b) : Cont r b :=
+  fun b2r =>
+    ka.run fun aval =>
+      (a2kb aval).run b2r
+
+def Cont.map {r a b} (x : Cont r a) (f : a → b) : Cont r b :=
   x.bind (fun a => Cont.pure (f a))
-
-def Cont.run {r} (x : Cont r r) : r :=
-  x id
 
 instance : Monad (Cont r) where
   pure := Cont.pure
   bind := Cont.bind
 
 
-def Cont.runUnit {r} (x : Cont r r) : r :=
-  x id
 
-def Cont' (r : Type) := (a : Type) → (a → r) → r
 
-def Cont'.run {r a} (x : Cont' r) (k : a → r) : r :=
-  x _ k
+-- (a -> r) -> r
+def Cont' (a : Type) := ({r : Type} → (a → r) → r)
 
-def Cont'.pure {r} (val : r) : Cont' r := fun _alpha _k => val
+def Cont'.run {r} (x : Cont' a) (k : a → r) : r :=
+  x k
 
-def Cont'.bind {r } (x : Cont' r) (f : r → Cont' s) : Cont' s :=
-  f (x.run id)
+def Cont'.pure {r} (val : r) : Cont' r := fun k => k val
+
+def Cont'.bind (ka : Cont' a) (a2kb : a → Cont' b) : Cont' b :=
+  a2kb (ka.run id)
 
 def Cont'.map {r s} (x : Cont' r) (f : r → s) : Cont' s :=
   x.bind (fun a => Cont'.pure (f a))
@@ -152,24 +154,85 @@ instance : Monad (Cont') where
   pure := Cont'.pure
   bind := Cont'.bind
 
-def BuilderM : Type := Html × IO.Ref (Html) → IO Html
 
-def BuilderM.finish (x : BuilderM) : IO Html := do
+
+def BuilderM (α : Type) : Type := Html × IO.Ref (Html) → IO (Html × α)
+
+def BuilderM.finish (x : BuilderM Unit) : IO Html := do
   let htmlRef : IO.Ref (Html) ← IO.mkRef (<div></div>)
-  let html ← x (<div></div>, htmlRef)
+  let (html, _) ← x (<div></div>, htmlRef)
   htmlRef.set html
   createStatefulHtml <| htmlRef.get
 
-def BuilderM.button (label : String) : BuilderM :=
+def BuilderM.button (label : String) : BuilderM Unit :=
   fun (next, ref) => do
-    return <div>
+    return (<div>
       <Button label={label} onClick={← WithRpcRef.mk do ref.set next} />
-    </div>
+    </div>, ())
 
-def BuilderM.seq (y : BuilderM) (x : BuilderM) : BuilderM :=
+def BuilderM.getBool (statement : String) (b : Bool -> BuilderM Unit) : BuilderM Unit :=
+  fun (next, ref) => do
+    let resultRef : IO.Ref (Option Bool) ← IO.mkRef none
+    let html :=
+      <div>
+        <p>{.text statement}</p>
+        <Button label="True" onClick={← WithRpcRef.mk do resultRef.set true; ref.set (← b true (next, ref)).fst } />
+        <Button label="False" onClick={← WithRpcRef.mk do resultRef.set false; ref.set (← b false (next, ref)).fst } />
+      </div>
+    return (html, ())
+
+def BuilderM.getBoolK (label : String) : Cont (BuilderM Unit) Bool := BuilderM.getBool label
+
+def BuilderM.seq' (y : BuilderM β) (x : β → BuilderM α) : BuilderM α :=
   fun s => do
-    let h1 ← x s
+    let (html, betaval) ← y s
+    (x betaval) (html, s.2)
+
+
+def BuilderM.buttonUnit (label : String) (rest : Unit -> BuilderM Unit) : BuilderM Unit :=
+  BuilderM.seq' (rest ()) (fun () => BuilderM.button label)
+
+def BuilderM.buttonK (label : String) : Cont (BuilderM Unit) Unit :=
+  BuilderM.buttonUnit label
+
+
+
+
+def BuilderM.empty : BuilderM Unit :=
+  fun (next, _ref) => return (next, ())
+
+
+def BuilderM.runK (x : Cont (BuilderM Unit) Unit) : BuilderM Unit :=
+  x.run (fun _ => BuilderM.empty)
+
+def BuilderM.seq (y : BuilderM Unit) (x : BuilderM Unit) : BuilderM Unit :=
+  fun s => do
+    let (h1, _) ← x s
     y (h1, s.2)
+
+#html show IO _ from BuilderM.finish <| BuilderM.runK <| do
+  let b <- BuilderM.getBoolK "foo"
+  if b then BuilderM.buttonK "Click me!" else BuilderM.buttonK "And again!"
+
+
+  -- (BuilderM.button "And again!" |>.seq
+    -- (BuilderM.button "One more time!"))
+
+
+abbrev StupidM (α : Type):= StateM (BuilderM Unit → BuilderM Unit) α
+def StupidM.button (label : String) : StupidM Unit := do
+  modify fun b => b ∘ ((BuilderM.button label).seq)
+
+def StupidM.finish (x : StupidM Unit) : IO Html :=
+  let (_, f) := x.run id
+  BuilderM.finish (f BuilderM.empty)
+
+
+#html show IO _ from StupidM.finish do
+  StupidM.button "Click me!"
+  StupidM.button "And again!"
+  StupidM.button "One more time!"
+
 
 #html show IO _ from BuilderM.finish <|
   BuilderM.button "Click me!" |>.seq
