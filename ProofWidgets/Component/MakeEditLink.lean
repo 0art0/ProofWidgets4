@@ -7,7 +7,7 @@ public meta section
 
 /-- Assuming that `s` is the content of a file starting at position `p`,
 advance `p` to the end of `s`. -/
-def Lean.Lsp.Position.advance (p : Position) (s : Substring) : Position :=
+def Lean.Lsp.Position.advance (p : Position) (s : Substring.Raw) : Position :=
   let (nLinesAfter, lastLineUtf16Sz) := s.foldl
     (init := (0, 0))
     fun (n, l) c => if c == '\n' then (n + 1, 0) else (n, l + c.utf16Size.toNat)
@@ -43,7 +43,7 @@ def MakeEditLinkProps.ofReplaceRange' (doc : Server.DocumentMeta) (range : Lsp.R
   if newSelection?.isSome then
     { edit, newSelection? }
   else
-    let endPos := range.start.advance newText.toSubstring
+    let endPos := range.start.advance newText.toRawSubstring
     { edit, newSelection? := some { start := endPos, «end» := endPos } }
 
 /-- Replace `range` with `newText`.
@@ -54,8 +54,8 @@ def MakeEditLinkProps.ofReplaceRange (doc : Server.DocumentMeta) (range : Lsp.Ra
     (newText : String) (newSelection? : Option (String.Pos.Raw × String.Pos.Raw) := none) :
     MakeEditLinkProps :=
   ofReplaceRange' doc range newText (newSelection?.map fun (s, e) =>
-    let ps := range.start.advance (newText.toSubstring.extract 0 s)
-    let pe := ps.advance (newText.toSubstring.extract s e)
+    let ps := range.start.advance (newText.toRawSubstring.extract 0 s)
+    let pe := ps.advance (newText.toRawSubstring.extract s e)
     { start := ps, «end» := pe })
 
 /-- A link that, when clicked, makes the specified edit
