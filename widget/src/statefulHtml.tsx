@@ -3,10 +3,16 @@ import { useRpcSession, RpcPtr, DocumentPosition } from "@leanprover/infoview"
 import { Html, renderHtml } from "./htmlDisplay"
 
 interface ButtonProps {
-  content: Html
+  // content: Html
   onClick: RpcPtr<'RequestMUnit'>
   style?: React.CSSProperties
-  pos: DocumentPosition
+  // pos: DocumentPosition
+}
+
+interface HoverProps {
+  onMouseEnter: RpcPtr<'RequestMUnit'>
+  onMouseLeave: RpcPtr<'RequestMUnit'>
+  style?: React.CSSProperties
 }
 
 interface TextInputProps {
@@ -18,9 +24,9 @@ interface TextInputProps {
 }
 
 interface NumberInputProps {
-  placeholder: number
+  placeholder: string
   onChange: RpcPtr<'NumberToRequestMUnit'>
-  value: number
+  value?: number
   max?: number
   min?: number
   width?: number
@@ -63,6 +69,7 @@ interface StatefulHtmlProps {
 
 type Interaction =
   | { type: 'Button', props: ButtonProps }
+  | { type: 'Hover', props: HoverProps }
   | { type: 'TextInput', props: TextInputProps }
   | { type: 'NumberInput', props: NumberInputProps }
   | { type: 'CheckBox', props: CheckboxProps }
@@ -74,31 +81,71 @@ type InteractionState = Interaction[]
 function updateInteractionState(
     state: InteractionState,
     interaction: Interaction): InteractionState {
+  console.log("Interaction:", interaction)
   return [...state, interaction]
 }
 
 const InteractionDispatchContext = React.createContext<React.Dispatch<Interaction> | null>(null)
 
-export function Button(props: ButtonProps): JSX.Element {
+export function Button(props: React.PropsWithChildren<ButtonProps>): JSX.Element {
   const rs = useRpcSession()
   const interactionDispatch = React.useContext(InteractionDispatchContext)
-  const [renderedContent, setRenderedContent] = React.useState<JSX.Element>(<></>)
+  // const [renderedContent, setRenderedContent] = React.useState<JSX.Element>(<></>)
 
-  React.useEffect(() => {
-    renderHtml(rs, props.pos, props.content).then(setRenderedContent)
-  }, [props.content, props.pos, rs])
+  // React.useEffect(() => {
+  //   renderHtml(rs, props.pos, props.content).then(setRenderedContent)
+  // }, [props.content, props.pos, rs])
 
   const onClick = async () => {
     await rs.call<ButtonProps, null>(
-      "Button.rpc", props)
+      "Button.rpc", { onClick: props.onClick, style: props.style })
       .then(() => {
-        interactionDispatch?.({ type: 'Button', props })
+        interactionDispatch?.({ type: 'Button', props: { onClick: props.onClick, style: props.style } })
       })
       .catch((e) => {
         console.error("Error clicking button:", e)
       })
   }
-  return <button onClick={onClick} style={props.style}>{renderedContent}</button>
+  return <button onClick={onClick} style={props.style}>{props.children}</button>
+}
+
+export function Hover(props: React.PropsWithChildren<HoverProps>): JSX.Element {
+  const rs = useRpcSession()
+  const interactionDispatch = React.useContext(InteractionDispatchContext)
+
+  const hoverProps = {
+    onMouseEnter: props.onMouseEnter,
+    onMouseLeave: props.onMouseLeave,
+    style: props.style
+  }
+
+  const onMouseEnter = async () => {
+    await rs.call<HoverProps, null>(
+      "Hover.onMouseEnter.rpc", hoverProps)
+      .then(() => {
+        interactionDispatch?.({ type: 'Hover', props: hoverProps })
+      })
+      .catch((e) => {
+        console.error("Error on mouse enter:", e)
+      })
+  }
+
+  const onMouseLeave = async () => {
+    await rs.call<HoverProps, null>(
+      "Hover.onMouseLeave.rpc", hoverProps)
+      .then(() => {
+        interactionDispatch?.({ type: 'Hover', props: hoverProps })
+      })
+      .catch((e) => {
+        console.error("Error on mouse leave:", e)
+      })
+  }
+
+  return (
+    <div onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} style={props.style}>
+      {props.children}
+    </div>
+  )
 }
 
 export function TextInput(props: TextInputProps): JSX.Element {
@@ -143,8 +190,8 @@ export function NumberInput(props: NumberInputProps): JSX.Element {
   <div>
     <input
       type="number"
-      value={props.value}
-      placeholder={props.placeholder.toString()}
+      value={props.value ?? undefined}
+      placeholder={props.placeholder}
       onChange={onChange}
       max={props.max}
       min={props.min}
